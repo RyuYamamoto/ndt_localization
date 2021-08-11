@@ -5,6 +5,7 @@
 
 NDTLocalization::NDTLocalization()
 {
+  pnh_.param<double>("downsample_leaf_size", downsample_leaf_size_, 3.0);
   pnh_.param<double>("transformation_epsilon", transformation_epsilon_, 0.01);
   pnh_.param<double>("step_size", step_size_, 0.1);
   pnh_.param<double>("ndt_resolution", ndt_resolution_, 5.0);
@@ -30,6 +31,16 @@ NDTLocalization::NDTLocalization()
   ndt_align_cloud_publisher_ = pnh_.advertise<sensor_msgs::PointCloud2>("aligned_cloud", 1);
   ndt_pose_publisher_ = pnh_.advertise<geometry_msgs::PoseStamped>("ndt_pose", 1);
   transform_probability_publisher_ = pnh_.advertise<std_msgs::Float32>("transform_probability", 1);
+}
+
+void NDTLocalization::downsample(
+  const pcl::PointCloud<PointType>::Ptr & input_cloud_ptr,
+  pcl::PointCloud<PointType>::Ptr & output_cloud_ptr)
+{
+  pcl::VoxelGrid<PointType> voxel_grid;
+  voxel_grid.setLeafSize(downsample_leaf_size_, downsample_leaf_size_, downsample_leaf_size_);
+  voxel_grid.setInputCloud(input_cloud_ptr);
+  voxel_grid.filter(*output_cloud_ptr);
 }
 
 void NDTLocalization::mapCallback(const sensor_msgs::PointCloud2 & map)
@@ -59,10 +70,8 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
   pcl::PointCloud<PointType>::Ptr input_cloud_ptr(new pcl::PointCloud<PointType>);
   pcl::PointCloud<PointType>::Ptr filtered_cloud(new pcl::PointCloud<PointType>);
   pcl::fromROSMsg(points, *input_cloud_ptr);
-  pcl::VoxelGrid<PointType> voxel_grid;
-  voxel_grid.setLeafSize(3.0, 3.0, 3.0);
-  voxel_grid.setInputCloud(input_cloud_ptr);
-  voxel_grid.filter(*filtered_cloud);
+
+  downsample(input_cloud_ptr, filtered_cloud);
   ndt_->setInputSource(filtered_cloud);
 
   Eigen::Matrix4f init_guess = Eigen::Matrix4f::Identity();

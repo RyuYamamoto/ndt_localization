@@ -34,6 +34,10 @@ private:
   void pointsCallback(const sensor_msgs::PointCloud2 & points);
   void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped & initialpose);
 
+  void downsample(
+    const pcl::PointCloud<PointType>::Ptr & input_cloud_ptr,
+    pcl::PointCloud<PointType>::Ptr & output_cloud_ptr);
+
   void publishTF(
     const std::string frame_id, const std::string child_frame_id,
     const geometry_msgs::PoseStamped pose);
@@ -64,6 +68,8 @@ private:
   int omp_num_thread_;
   std::string map_frame_id_;
   std::string base_frame_id_;
+
+  double downsample_leaf_size_;
 
   bool localization_ready_{false};
 };
