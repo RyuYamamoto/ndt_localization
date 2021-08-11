@@ -34,7 +34,9 @@ private:
   void pointsCallback(const sensor_msgs::PointCloud2 & points);
   void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped & initialpose);
 
-  void publishTF(const std::string frame_id, const std::string child_frame_id, const geometry_msgs::PoseStamped pose);
+  void publishTF(
+    const std::string frame_id, const std::string child_frame_id,
+    const geometry_msgs::PoseStamped pose);
 
 private:
   ros::NodeHandle nh_{};
@@ -52,7 +54,7 @@ private:
 
   geometry_msgs::Pose initial_pose_;
 
-	tf2_ros::TransformBroadcaster broadcaster_;
+  tf2_ros::TransformBroadcaster broadcaster_;
 
   // config for ndt omp
   double transformation_epsilon_;
@@ -63,7 +65,7 @@ private:
   std::string map_frame_id_;
   std::string base_frame_id_;
 
-	bool localization_ready_{false};
+  bool localization_ready_{false};
 };
 
 #endif

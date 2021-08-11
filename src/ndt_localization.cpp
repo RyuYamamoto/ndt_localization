@@ -49,21 +49,21 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
     return;
   }
 
-	if(!localization_ready_) {
-		ROS_ERROR("initial pose not received!");
-		return;
-	}
+  if (!localization_ready_) {
+    ROS_ERROR("initial pose not received!");
+    return;
+  }
 
   const ros::Time current_scan_time = points.header.stamp;
 
-	pcl::PointCloud<PointType>::Ptr input_cloud_ptr(new pcl::PointCloud<PointType>);
-	pcl::PointCloud<PointType>::Ptr filtered_cloud(new pcl::PointCloud<PointType>);
-	pcl::fromROSMsg(points, *input_cloud_ptr);
-	pcl::VoxelGrid<PointType> voxel_grid;
-	voxel_grid.setLeafSize(3.0, 3.0, 3.0);
-	voxel_grid.setInputCloud(input_cloud_ptr);
-	voxel_grid.filter(*filtered_cloud);
-	ndt_->setInputSource(filtered_cloud);
+  pcl::PointCloud<PointType>::Ptr input_cloud_ptr(new pcl::PointCloud<PointType>);
+  pcl::PointCloud<PointType>::Ptr filtered_cloud(new pcl::PointCloud<PointType>);
+  pcl::fromROSMsg(points, *input_cloud_ptr);
+  pcl::VoxelGrid<PointType> voxel_grid;
+  voxel_grid.setLeafSize(3.0, 3.0, 3.0);
+  voxel_grid.setInputCloud(input_cloud_ptr);
+  voxel_grid.filter(*filtered_cloud);
+  ndt_->setInputSource(filtered_cloud);
 
   Eigen::Matrix4f init_guess = Eigen::Matrix4f::Identity();
 
@@ -82,21 +82,21 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
   Eigen::Affine3d result_ndt_pose_affine;
   result_ndt_pose_affine.matrix() = result_ndt_pose.cast<double>();
   const geometry_msgs::Pose ndt_pose = tf2::toMsg(result_ndt_pose_affine);
-	initial_pose_ = ndt_pose;
+  initial_pose_ = ndt_pose;
 
   geometry_msgs::PoseStamped ndt_pose_msg;
   ndt_pose_msg.header.frame_id = map_frame_id_;
   ndt_pose_msg.header.stamp = current_scan_time;
-	ndt_pose_msg.pose = ndt_pose;
+  ndt_pose_msg.pose = ndt_pose;
 
-	if(convergenced) {
-		ndt_pose_publisher_.publish(ndt_pose_msg);
-		publishTF(map_frame_id_, base_frame_id_, ndt_pose_msg);
-	}
+  if (convergenced) {
+    ndt_pose_publisher_.publish(ndt_pose_msg);
+    publishTF(map_frame_id_, base_frame_id_, ndt_pose_msg);
+  }
 
-	std_msgs::Float32 transform_probability;
-	transform_probability.data = ndt_->getTransformationProbability();
-	transform_probability_publisher_.publish(transform_probability);
+  std_msgs::Float32 transform_probability;
+  transform_probability.data = ndt_->getTransformationProbability();
+  transform_probability_publisher_.publish(transform_probability);
 
   sensor_msgs::PointCloud2 aligned_cloud_msg;
   pcl::toROSMsg(*output_cloud, aligned_cloud_msg);
@@ -110,7 +110,7 @@ void NDTLocalization::initialPoseCallback(
   ROS_INFO("initial pose callback.");
   if (initialpose.header.frame_id == map_frame_id_) {
     initial_pose_ = initialpose.pose.pose;
-		if(!localization_ready_) localization_ready_ = true;
+    if (!localization_ready_) localization_ready_ = true;
   } else {
     // TODO transform
     ROS_ERROR(
@@ -119,20 +119,22 @@ void NDTLocalization::initialPoseCallback(
   }
 }
 
-void NDTLocalization::publishTF(const std::string frame_id, const std::string child_frame_id, const geometry_msgs::PoseStamped pose)
+void NDTLocalization::publishTF(
+  const std::string frame_id, const std::string child_frame_id,
+  const geometry_msgs::PoseStamped pose)
 {
-	geometry_msgs::TransformStamped transform_stamped;
+  geometry_msgs::TransformStamped transform_stamped;
 
-	transform_stamped.header.frame_id = frame_id;
-	transform_stamped.header.stamp = pose.header.stamp;
-	transform_stamped.child_frame_id = child_frame_id;
-	transform_stamped.transform.translation.x = pose.pose.position.x;
-	transform_stamped.transform.translation.y = pose.pose.position.y;
-	transform_stamped.transform.translation.z = pose.pose.position.z;
-	transform_stamped.transform.rotation.w = pose.pose.orientation.w;
-	transform_stamped.transform.rotation.x = pose.pose.orientation.x;
-	transform_stamped.transform.rotation.y = pose.pose.orientation.y;
-	transform_stamped.transform.rotation.z = pose.pose.orientation.z;
+  transform_stamped.header.frame_id = frame_id;
+  transform_stamped.header.stamp = pose.header.stamp;
+  transform_stamped.child_frame_id = child_frame_id;
+  transform_stamped.transform.translation.x = pose.pose.position.x;
+  transform_stamped.transform.translation.y = pose.pose.position.y;
+  transform_stamped.transform.translation.z = pose.pose.position.z;
+  transform_stamped.transform.rotation.w = pose.pose.orientation.w;
+  transform_stamped.transform.rotation.x = pose.pose.orientation.x;
+  transform_stamped.transform.rotation.y = pose.pose.orientation.y;
+  transform_stamped.transform.rotation.z = pose.pose.orientation.z;
 
-	broadcaster_.sendTransform(transform_stamped);
+  broadcaster_.sendTransform(transform_stamped);
 }
