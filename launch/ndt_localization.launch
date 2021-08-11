@@ -1,0 +1,33 @@
+<launch>
+  <arg name="map_path" default="$(find points_map_loader)/pcd/test.pcd"/>
+  <arg name="rviz" default="true"/>
+  <arg name="transformation_epsilon" default="0.01"/>
+  <arg name="step_size" default="0.1"/>
+  <arg name="ndt_resolution" default="2.0"/>
+  <arg name="max_iteration" default="30"/>
+  <arg name="omp_num_thread" default="4"/>
+  <arg name="map_frame_id" default="map"/>
+  <arg name="base_frame_id" default="base_link"/>
+
+  <include file="$(find points_map_loader)/launch/points_map_loader.launch">
+    <arg name="map_path" default="$(arg map_path)"/>
+  </include>
+
+  <node pkg="tf" type="static_transform_publisher" name="velodyne_transform_publisher" args="0.0 0 0.0 0 0 0 /base_link /velodyne 10" />
+
+  <node pkg="ndt_localization" type="ndt_localization_node" name="ndt_localization_node">
+    <remap from="~points_map" to="points_map"/>
+    <remap from="~points_raw" to="velodyne_points"/>
+    <param name="transformation_epsilon" value="$(arg transformation_epsilon)"/>
+    <param name="step_size" value="$(arg step_size)"/>
+    <param name="ndt_resolution" value="$(arg ndt_resolution)"/>
+    <param name="max_iteration" value="$(arg max_iteration)"/>
+    <param name="omp_num_thread" value="$(arg omp_num_thread)"/>
+    <param name="map_frame_id" value="$(arg map_frame_id)"/>
+    <param name="base_frame_id" value="$(arg base_frame_id)"/>
+  </node>
+
+  <group if="$(arg rviz)">
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find ndt_localization)/rviz/ndt.rviz"/>
+  </group>
+</launch>
