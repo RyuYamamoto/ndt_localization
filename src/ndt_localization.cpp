@@ -89,7 +89,7 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
   const Eigen::Matrix4f base_to_sensor_frame_matrix =
     base_to_sensor_frame_affine.matrix().cast<float>();
   pcl::transformPointCloud(*filtered_cloud, *transform_cloud_ptr, base_to_sensor_frame_matrix);
-  ndt_->setInputSource(filtered_cloud);
+  ndt_->setInputSource(transform_cloud_ptr);
 
   // calculation initial pose for NDT
   Eigen::Matrix4f init_guess = Eigen::Matrix4f::Identity();
