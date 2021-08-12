@@ -59,7 +59,7 @@ private:
 
   geometry_msgs::Pose initial_pose_;
 
-	tf2_ros::Buffer tf_buffer_;
+  tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformBroadcaster broadcaster_;
 
   // config for ndt omp
