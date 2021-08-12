@@ -18,6 +18,7 @@
 #include <pcl/point_types.h>
 #include <pcl/registration/ndt.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl_ros/transforms.h>
 
 #include <pclomp/ndt_omp.h>
 
@@ -33,6 +34,10 @@ private:
   void mapCallback(const sensor_msgs::PointCloud2 & map);
   void pointsCallback(const sensor_msgs::PointCloud2 & points);
   void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped & initialpose);
+
+  void downsample(
+    const pcl::PointCloud<PointType>::Ptr & input_cloud_ptr,
+    pcl::PointCloud<PointType>::Ptr & output_cloud_ptr);
 
   void publishTF(
     const std::string frame_id, const std::string child_frame_id,
@@ -54,6 +59,7 @@ private:
 
   geometry_msgs::Pose initial_pose_;
 
+  tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformBroadcaster broadcaster_;
 
   // config for ndt omp
@@ -64,6 +70,8 @@ private:
   int omp_num_thread_;
   std::string map_frame_id_;
   std::string base_frame_id_;
+
+  double downsample_leaf_size_;
 
   bool localization_ready_{false};
 };
