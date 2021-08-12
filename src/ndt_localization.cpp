@@ -77,11 +77,10 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
   // transform base_link to sensor_link
   pcl::PointCloud<PointType>::Ptr transform_cloud_ptr(new pcl::PointCloud<PointType>);
   const std::string sensor_frame_id = points.header.frame_id;
-  std::cout << sensor_frame_id.c_str() << std::endl;
   geometry_msgs::TransformStamped sensor_frame_transform;
   try {
-    sensor_frame_transform =
-      tf_buffer_.lookupTransform(base_frame_id_, sensor_frame_id, ros::Time(0.0));
+    sensor_frame_transform = tf_buffer_.lookupTransform(
+      base_frame_id_, sensor_frame_id, current_scan_time, ros::Duration(1.0));
   } catch (tf2::TransformException & ex) {
     ROS_ERROR("%s", ex.what());
     return;
