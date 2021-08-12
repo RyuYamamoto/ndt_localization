@@ -71,11 +71,29 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
   pcl::PointCloud<PointType>::Ptr filtered_cloud(new pcl::PointCloud<PointType>);
   pcl::fromROSMsg(points, *input_cloud_ptr);
 
-  downsample(input_cloud_ptr, filtered_cloud);
+	// downsampling input point cloud
+	downsample(input_cloud_ptr, filtered_cloud);
+
+	// transform base_link to sensor_link
+	pcl::PointCloud<PointType>::Ptr transform_cloud_ptr(new pcl::PointCloud<PointType>);
+	const std::string sensor_frame_id = points.header.frame_id;
+  std::cout << sensor_frame_id.c_str() << std::endl;
+  geometry_msgs::TransformStamped sensor_frame_transform;
+  try {
+    sensor_frame_transform =
+      tf_buffer_.lookupTransform(base_frame_id_, sensor_frame_id, ros::Time(0.0));
+  } catch (tf2::TransformException & ex) {
+    ROS_ERROR("%s", ex.what());
+    return;
+  }
+  const Eigen::Affine3d base_to_sensor_frame_affine = tf2::transformToEigen(sensor_frame_transform);
+  const Eigen::Matrix4f base_to_sensor_frame_matrix =
+    base_to_sensor_frame_affine.matrix().cast<float>();
+	pcl::transformPointCloud(*filtered_cloud, *transform_cloud_ptr, base_to_sensor_frame_matrix);
   ndt_->setInputSource(filtered_cloud);
 
+  // calculation initial pose for NDT
   Eigen::Matrix4f init_guess = Eigen::Matrix4f::Identity();
-
   Eigen::Affine3d initial_pose_affine;
   tf2::fromMsg(initial_pose_, initial_pose_affine);
   init_guess = initial_pose_affine.matrix().cast<float>();

@@ -18,6 +18,7 @@
 #include <pcl/point_types.h>
 #include <pcl/registration/ndt.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl_ros/transforms.h>
 
 #include <pclomp/ndt_omp.h>
 
@@ -58,6 +59,7 @@ private:
 
   geometry_msgs::Pose initial_pose_;
 
+	tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformBroadcaster broadcaster_;
 
   // config for ndt omp
