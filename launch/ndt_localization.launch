@@ -1,6 +1,9 @@
 <launch>
   <arg name="map_path" default="$(find points_map_loader)/pcd/test.pcd"/>
   <arg name="rviz" default="true"/>
+  <arg name="min_range" default="0.5"/>
+  <arg name="max_range" default="60.0"/>
+  <arg name="downsample_leaf_size" default="3.0"/>
   <arg name="transformation_epsilon" default="0.01"/>
   <arg name="step_size" default="0.1"/>
   <arg name="ndt_resolution" default="2.0"/>
@@ -18,6 +21,9 @@
   <node pkg="ndt_localization" type="ndt_localization_node" name="ndt_localization_node">
     <remap from="~points_map" to="points_map"/>
     <remap from="~points_raw" to="velodyne_points"/>
+    <param name="min_range" value="$(arg min_range)"/>
+    <param name="max_range" value="$(arg max_range)"/>
+    <param name="downsample_leaf_size" value="$(arg downsample_leaf_size)"/>
     <param name="transformation_epsilon" value="$(arg transformation_epsilon)"/>
     <param name="step_size" value="$(arg step_size)"/>
     <param name="ndt_resolution" value="$(arg ndt_resolution)"/>
