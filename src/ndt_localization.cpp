@@ -5,6 +5,8 @@
 
 NDTLocalization::NDTLocalization()
 {
+  pnh_.param<double>("min_range", min_range_, 0.5);
+  pnh_.param<double>("max_range", max_range_, 60.0);
   pnh_.param<double>("downsample_leaf_size", downsample_leaf_size_, 3.0);
   pnh_.param<double>("transformation_epsilon", transformation_epsilon_, 0.01);
   pnh_.param<double>("step_size", step_size_, 0.1);
@@ -43,6 +45,16 @@ void NDTLocalization::downsample(
   voxel_grid.filter(*output_cloud_ptr);
 }
 
+void NDTLocalization::crop(
+  const pcl::PointCloud<PointType>::Ptr & input_cloud_ptr,
+  pcl::PointCloud<PointType>::Ptr output_cloud_ptr, const double min_range, const double max_range)
+{
+  for (const auto & p : input_cloud_ptr->points) {
+    const double dist = std::sqrt(p.x * p.x + p.y * p.y);
+    if (min_range < dist && dist < max_range) { output_cloud_ptr->points.emplace_back(p); }
+  }
+}
+
 void NDTLocalization::mapCallback(const sensor_msgs::PointCloud2 & map)
 {
   ROS_INFO("map callback");
@@ -68,11 +80,15 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
   const ros::Time current_scan_time = points.header.stamp;
 
   pcl::PointCloud<PointType>::Ptr input_cloud_ptr(new pcl::PointCloud<PointType>);
-  pcl::PointCloud<PointType>::Ptr filtered_cloud(new pcl::PointCloud<PointType>);
   pcl::fromROSMsg(points, *input_cloud_ptr);
 
   // downsampling input point cloud
+  pcl::PointCloud<PointType>::Ptr filtered_cloud(new pcl::PointCloud<PointType>);
   downsample(input_cloud_ptr, filtered_cloud);
+
+  // crop point cloud
+  pcl::PointCloud<PointType>::Ptr crop_cloud(new pcl::PointCloud<PointType>);
+  crop(filtered_cloud, crop_cloud, min_range_, max_range_);
 
   // transform base_link to sensor_link
   pcl::PointCloud<PointType>::Ptr transform_cloud_ptr(new pcl::PointCloud<PointType>);
@@ -97,7 +113,7 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
   const Eigen::Affine3d base_to_sensor_frame_affine = tf2::transformToEigen(sensor_frame_transform);
   const Eigen::Matrix4f base_to_sensor_frame_matrix =
     base_to_sensor_frame_affine.matrix().cast<float>();
-  pcl::transformPointCloud(*filtered_cloud, *transform_cloud_ptr, base_to_sensor_frame_matrix);
+  pcl::transformPointCloud(*crop_cloud, *transform_cloud_ptr, base_to_sensor_frame_matrix);
   ndt_->setInputSource(transform_cloud_ptr);
 
   // calculation initial pose for NDT

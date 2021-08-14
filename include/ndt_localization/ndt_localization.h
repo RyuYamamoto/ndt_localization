@@ -38,6 +38,10 @@ private:
   void downsample(
     const pcl::PointCloud<PointType>::Ptr & input_cloud_ptr,
     pcl::PointCloud<PointType>::Ptr & output_cloud_ptr);
+  void crop(
+    const pcl::PointCloud<PointType>::Ptr & input_cloud_ptr,
+    pcl::PointCloud<PointType>::Ptr output_cloud_ptr, const double min_range,
+    const double max_range);
 
   void publishTF(
     const std::string frame_id, const std::string child_frame_id,
@@ -72,6 +76,9 @@ private:
   std::string base_frame_id_;
 
   double downsample_leaf_size_;
+
+  double min_range_;
+  double max_range_;
 
   bool localization_ready_{false};
 };
