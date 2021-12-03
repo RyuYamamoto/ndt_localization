@@ -1,0 +1,38 @@
+<launch>
+  <arg name="map_path" default="$(find-pkg-share points_map_loader)/pcd/test.pcd"/>
+  <arg name="rviz" default="true"/>
+  <arg name="min_range" default="0.5"/>
+  <arg name="max_range" default="60.0"/>
+  <arg name="downsample_leaf_size" default="3.0"/>
+  <arg name="transformation_epsilon" default="0.01"/>
+  <arg name="step_size" default="0.1"/>
+  <arg name="ndt_resolution" default="2.0"/>
+  <arg name="max_iteration" default="30"/>
+  <arg name="omp_num_thread" default="4"/>
+  <arg name="map_frame_id" default="map"/>
+  <arg name="base_frame_id" default="base_link"/>
+
+  <include file="$(find-pkg-share points_map_loader)/launch/points_map_loader.launch.xml">
+    <arg name="map_path" value="$(var map_path)"/>
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <node pkg="tf2_ros" exec="static_transform_publisher" name="velodyne_transform_publisher" args="0 0 0 0 0 0 /base_link /velodyne" />
+
+  <node pkg="ndt_localization" exec="ndt_localization_node" name="ndt_localization_node">
+    <remap from="~/points_map" to="points_map"/>
+    <remap from="~/points_raw" to="velodyne_points"/>
+    <param name="min_range" value="$(var min_range)"/>
+    <param name="max_range" value="$(var max_range)"/>
+    <param name="downsample_leaf_size" value="$(var downsample_leaf_size)"/>
+    <param name="transformation_epsilon" value="$(var transformation_epsilon)"/>
+    <param name="step_size" value="$(var step_size)"/>
+    <param name="ndt_resolution" value="$(var ndt_resolution)"/>
+    <param name="max_iteration" value="$(var max_iteration)"/>
+    <param name="omp_num_thread" value="$(var omp_num_thread)"/>
+    <param name="map_frame_id" value="$(var map_frame_id)"/>
+    <param name="base_frame_id" value="$(var base_frame_id)"/>
+  </node>
+
+  <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(find-pkg-share ndt_localization)/rviz/ndt.rviz"/>
+</launch>

@@ -1,22 +1,23 @@
 #include <ndt_localization/ndt_localization.h>
 
-#include <eigen_conversions/eigen_msg.h>
+//#include <eigen_conversions/eigen_msg.h>
 #include <tf2_eigen/tf2_eigen.h>
 
-NDTLocalization::NDTLocalization()
+NDTLocalization::NDTLocalization() : Node("ndt_localization")
 {
-  pnh_.param<double>("min_range", min_range_, 0.5);
-  pnh_.param<double>("max_range", max_range_, 60.0);
-  pnh_.param<double>("downsample_leaf_size", downsample_leaf_size_, 3.0);
-  pnh_.param<double>("transformation_epsilon", transformation_epsilon_, 0.01);
-  pnh_.param<double>("step_size", step_size_, 0.1);
-  pnh_.param<double>("ndt_resolution", ndt_resolution_, 5.0);
-  pnh_.param<int>("max_iteration", max_iteration_, 20);
-  pnh_.param<int>("omp_num_thread", omp_num_thread_, 3);
-  pnh_.param<std::string>("map_frame_id", map_frame_id_, "map");
-  pnh_.param<std::string>("base_frame_id", base_frame_id_, "base_link");
+  min_range_ = this->declare_parameter("min_range", 0.5);
+  max_range_ = this->declare_parameter("max_range", 60.0);
+  downsample_leaf_size_ = this->declare_parameter("downsample_leaf_size", 3.0);
+  transformation_epsilon_ = this->declare_parameter("transformation_epsilon", 0.01);
+  step_size_ = this->declare_parameter("step_size", 0.1);
+  ndt_resolution_ = this->declare_parameter("ndt_resolution", 5.0);
+  max_iteration_ = this->declare_parameter("max_iteration", 20);
+  omp_num_thread_ = this->declare_parameter("omp_num_thread", 3);
+  map_frame_id_ = this->declare_parameter("map_frame_id", "map");
+  base_frame_id_ = this->declare_parameter("base_frame_id", "base_link");
 
-  ndt_.reset(new pclomp::NormalDistributionsTransform<PointType, PointType>);
+  ndt_ = std::make_shared<pclomp::NormalDistributionsTransform<PointType, PointType>>();
+  broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
   ndt_->setTransformationEpsilon(transformation_epsilon_);
   ndt_->setStepSize(step_size_);
@@ -25,14 +26,20 @@ NDTLocalization::NDTLocalization()
   ndt_->setNeighborhoodSearchMethod(pclomp::KDTREE);
   if (0 < omp_num_thread_) ndt_->setNumThreads(omp_num_thread_);
 
-  map_subscriber_ = pnh_.subscribe("points_map", 1, &NDTLocalization::mapCallback, this);
-  points_subscriber_ = pnh_.subscribe("points_raw", 1, &NDTLocalization::pointsCallback, this);
+  map_subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+    "points_map", 1, std::bind(&NDTLocalization::mapCallback, this, std::placeholders::_1));
+  points_subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+    "points_raw", 1, std::bind(&NDTLocalization::pointsCallback, this, std::placeholders::_1));
   initialpose_subscriber_ =
-    pnh_.subscribe("/initialpose", 1, &NDTLocalization::initialPoseCallback, this);
+    this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+      "/initialpose", 1,
+      std::bind(&NDTLocalization::initialPoseCallback, this, std::placeholders::_1));
 
-  ndt_align_cloud_publisher_ = pnh_.advertise<sensor_msgs::PointCloud2>("aligned_cloud", 1);
-  ndt_pose_publisher_ = pnh_.advertise<geometry_msgs::PoseStamped>("ndt_pose", 1);
-  transform_probability_publisher_ = pnh_.advertise<std_msgs::Float32>("transform_probability", 1);
+  ndt_align_cloud_publisher_ =
+    this->create_publisher<sensor_msgs::msg::PointCloud2>("aligned_cloud", 1);
+  ndt_pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("ndt_pose", 1);
+  transform_probability_publisher_ =
+    this->create_publisher<std_msgs::msg::Float32>("transform_probability", 1);
 }
 
 void NDTLocalization::downsample(
@@ -51,13 +58,15 @@ void NDTLocalization::crop(
 {
   for (const auto & p : input_cloud_ptr->points) {
     const double dist = std::sqrt(p.x * p.x + p.y * p.y);
-    if (min_range < dist && dist < max_range) { output_cloud_ptr->points.emplace_back(p); }
+    if (min_range < dist && dist < max_range) {
+      output_cloud_ptr->points.emplace_back(p);
+    }
   }
 }
 
-void NDTLocalization::mapCallback(const sensor_msgs::PointCloud2 & map)
+void NDTLocalization::mapCallback(const sensor_msgs::msg::PointCloud2 & map)
 {
-  ROS_INFO("map callback");
+  RCLCPP_INFO(get_logger(), "map callback");
 
   pcl::PointCloud<PointType>::Ptr map_cloud(new pcl::PointCloud<PointType>);
   pcl::fromROSMsg(map, *map_cloud);
@@ -65,19 +74,19 @@ void NDTLocalization::mapCallback(const sensor_msgs::PointCloud2 & map)
   ndt_->setInputTarget(map_cloud);
 }
 
-void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
+void NDTLocalization::pointsCallback(const sensor_msgs::msg::PointCloud2 & points)
 {
   if (ndt_->getInputTarget() == nullptr) {
-    ROS_ERROR("map not received!");
+    RCLCPP_ERROR(get_logger(), "map not received!");
     return;
   }
 
   if (!localization_ready_) {
-    ROS_ERROR("initial pose not received!");
+    RCLCPP_ERROR(get_logger(), "initial pose not received!");
     return;
   }
 
-  const ros::Time current_scan_time = points.header.stamp;
+  const rclcpp::Time current_scan_time = points.header.stamp;
 
   pcl::PointCloud<PointType>::Ptr input_cloud_ptr(new pcl::PointCloud<PointType>);
   pcl::fromROSMsg(points, *input_cloud_ptr);
@@ -93,12 +102,12 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
   // transform base_link to sensor_link
   pcl::PointCloud<PointType>::Ptr transform_cloud_ptr(new pcl::PointCloud<PointType>);
   const std::string sensor_frame_id = points.header.frame_id;
-  geometry_msgs::TransformStamped sensor_frame_transform;
+  geometry_msgs::msg::TransformStamped sensor_frame_transform;
   try {
     sensor_frame_transform = tf_buffer_.lookupTransform(
-      base_frame_id_, sensor_frame_id, current_scan_time, ros::Duration(1.0));
+      base_frame_id_, sensor_frame_id, current_scan_time, tf2::durationFromSec(0.5));
   } catch (tf2::TransformException & ex) {
-    ROS_ERROR("%s", ex.what());
+    RCLCPP_ERROR(get_logger(), "%s", ex.what());
     sensor_frame_transform.header.stamp = current_scan_time;
     sensor_frame_transform.header.frame_id = base_frame_id_;
     sensor_frame_transform.child_frame_id = sensor_frame_id;
@@ -132,49 +141,49 @@ void NDTLocalization::pointsCallback(const sensor_msgs::PointCloud2 & points)
 
   Eigen::Affine3d result_ndt_pose_affine;
   result_ndt_pose_affine.matrix() = result_ndt_pose.cast<double>();
-  const geometry_msgs::Pose ndt_pose = tf2::toMsg(result_ndt_pose_affine);
+  const geometry_msgs::msg::Pose ndt_pose = tf2::toMsg(result_ndt_pose_affine);
   initial_pose_ = ndt_pose;
 
-  geometry_msgs::PoseStamped ndt_pose_msg;
+  geometry_msgs::msg::PoseStamped ndt_pose_msg;
   ndt_pose_msg.header.frame_id = map_frame_id_;
   ndt_pose_msg.header.stamp = current_scan_time;
   ndt_pose_msg.pose = ndt_pose;
 
   if (convergenced) {
-    ndt_pose_publisher_.publish(ndt_pose_msg);
+    ndt_pose_publisher_->publish(ndt_pose_msg);
     publishTF(map_frame_id_, base_frame_id_, ndt_pose_msg);
   }
 
-  std_msgs::Float32 transform_probability;
+  std_msgs::msg::Float32 transform_probability;
   transform_probability.data = ndt_->getTransformationProbability();
-  transform_probability_publisher_.publish(transform_probability);
+  transform_probability_publisher_->publish(transform_probability);
 
-  sensor_msgs::PointCloud2 aligned_cloud_msg;
+  sensor_msgs::msg::PointCloud2 aligned_cloud_msg;
   pcl::toROSMsg(*output_cloud, aligned_cloud_msg);
   aligned_cloud_msg.header = points.header;
-  ndt_align_cloud_publisher_.publish(aligned_cloud_msg);
+  ndt_align_cloud_publisher_->publish(aligned_cloud_msg);
 }
 
 void NDTLocalization::initialPoseCallback(
-  const geometry_msgs::PoseWithCovarianceStamped & initialpose)
+  const geometry_msgs::msg::PoseWithCovarianceStamped & initialpose)
 {
-  ROS_INFO("initial pose callback.");
+  RCLCPP_INFO(get_logger(), "initial pose callback.");
   if (initialpose.header.frame_id == map_frame_id_) {
     initial_pose_ = initialpose.pose.pose;
     if (!localization_ready_) localization_ready_ = true;
   } else {
     // TODO transform
-    ROS_ERROR(
-      "frame_id is not same. initialpose.header.frame_id is %s",
+    RCLCPP_INFO(
+      get_logger(), "frame_id is not same. initialpose.header.frame_id is %s",
       initialpose.header.frame_id.c_str());
   }
 }
 
 void NDTLocalization::publishTF(
   const std::string frame_id, const std::string child_frame_id,
-  const geometry_msgs::PoseStamped pose)
+  const geometry_msgs::msg::PoseStamped pose)
 {
-  geometry_msgs::TransformStamped transform_stamped;
+  geometry_msgs::msg::TransformStamped transform_stamped;
 
   transform_stamped.header.frame_id = frame_id;
   transform_stamped.header.stamp = pose.header.stamp;
@@ -187,5 +196,5 @@ void NDTLocalization::publishTF(
   transform_stamped.transform.rotation.y = pose.pose.orientation.y;
   transform_stamped.transform.rotation.z = pose.pose.orientation.z;
 
-  broadcaster_.sendTransform(transform_stamped);
+  broadcaster_->sendTransform(transform_stamped);
 }

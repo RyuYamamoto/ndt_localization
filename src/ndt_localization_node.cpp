@@ -2,11 +2,11 @@
 
 int main(int argc, char** argv)
 {
-	ros::init(argc, argv, "ndt_localization");
+	rclcpp::init(argc, argv);
 
-	NDTLocalization ndt_localization;
+	rclcpp::spin(std::make_shared<NDTLocalization>());
 
-	ros::spin();
+	rclcpp::shutdown();
 
 	return 0;
 }
