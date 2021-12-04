@@ -27,19 +27,24 @@ NDTLocalization::NDTLocalization() : Node("ndt_localization")
   if (0 < omp_num_thread_) ndt_->setNumThreads(omp_num_thread_);
 
   map_subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    "points_map", rclcpp::QoS{1}.transient_local(), std::bind(&NDTLocalization::mapCallback, this, std::placeholders::_1));
+    "points_map", rclcpp::QoS{1}.transient_local(),
+    std::bind(&NDTLocalization::mapCallback, this, std::placeholders::_1));
   points_subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    "points_raw", rclcpp::SensorDataQoS().keep_last(5), std::bind(&NDTLocalization::pointsCallback, this, std::placeholders::_1));
+    "points_raw", rclcpp::SensorDataQoS().keep_last(5),
+    std::bind(&NDTLocalization::pointsCallback, this, std::placeholders::_1));
   initialpose_subscriber_ =
     this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
       "/initialpose", 1,
       std::bind(&NDTLocalization::initialPoseCallback, this, std::placeholders::_1));
 
   ndt_align_cloud_publisher_ =
-    this->create_publisher<sensor_msgs::msg::PointCloud2>("aligned_cloud", 1);
-  ndt_pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("ndt_pose", 1);
+    this->create_publisher<sensor_msgs::msg::PointCloud2>("aligned_cloud", 10);
+  ndt_pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("ndt_pose", 10);
+  ndt_pose_with_covariance_publisher_ =
+    this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
+      "ndt_pose_with_covariance", 10);
   transform_probability_publisher_ =
-    this->create_publisher<std_msgs::msg::Float32>("transform_probability", 1);
+    this->create_publisher<std_msgs::msg::Float32>("transform_probability", 10);
 }
 
 void NDTLocalization::downsample(
@@ -148,8 +153,21 @@ void NDTLocalization::pointsCallback(const sensor_msgs::msg::PointCloud2 & point
   ndt_pose_msg.header.stamp = current_scan_time;
   ndt_pose_msg.pose = ndt_pose;
 
+  // TODO: replace covariance from hessian matrix
+  geometry_msgs::msg::PoseWithCovarianceStamped ndt_pose_with_covariance_msg;
+  ndt_pose_with_covariance_msg.header.frame_id = map_frame_id_;
+  ndt_pose_with_covariance_msg.header.stamp = current_scan_time;
+  ndt_pose_with_covariance_msg.pose.pose = ndt_pose;
+  ndt_pose_with_covariance_msg.pose.covariance[0] = 1.0;
+  ndt_pose_with_covariance_msg.pose.covariance[7] = 1.0;
+  ndt_pose_with_covariance_msg.pose.covariance[14] = 1.0;
+  ndt_pose_with_covariance_msg.pose.covariance[21] = 1.0;
+  ndt_pose_with_covariance_msg.pose.covariance[28] = 1.0;
+  ndt_pose_with_covariance_msg.pose.covariance[35] = 1.0;
+
   if (convergenced) {
     ndt_pose_publisher_->publish(ndt_pose_msg);
+    ndt_pose_with_covariance_publisher_->publish(ndt_pose_with_covariance_msg);
     publishTF(map_frame_id_, base_frame_id_, ndt_pose_msg);
   }
 

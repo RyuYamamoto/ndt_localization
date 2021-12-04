@@ -1,8 +1,8 @@
 #ifndef _NDT_LOCALIZATION_
 #define _NDT_LOCALIZATION_
 
-#include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/float32.hpp>
 
@@ -48,12 +48,14 @@ private:
     const geometry_msgs::msg::PoseStamped pose);
 
 private:
-
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr map_subscriber_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr points_subscriber_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initialpose_subscriber_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
+    initialpose_subscriber_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr ndt_align_cloud_publisher_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr ndt_pose_publisher_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
+    ndt_pose_with_covariance_publisher_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr transform_probability_publisher_;
 
   // ndt_omp
