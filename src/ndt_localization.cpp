@@ -27,9 +27,9 @@ NDTLocalization::NDTLocalization() : Node("ndt_localization")
   if (0 < omp_num_thread_) ndt_->setNumThreads(omp_num_thread_);
 
   map_subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    "points_map", 1, std::bind(&NDTLocalization::mapCallback, this, std::placeholders::_1));
+    "points_map", rclcpp::QoS{1}.transient_local(), std::bind(&NDTLocalization::mapCallback, this, std::placeholders::_1));
   points_subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    "points_raw", 1, std::bind(&NDTLocalization::pointsCallback, this, std::placeholders::_1));
+    "points_raw", rclcpp::SensorDataQoS().keep_last(5), std::bind(&NDTLocalization::pointsCallback, this, std::placeholders::_1));
   initialpose_subscriber_ =
     this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
       "/initialpose", 1,
@@ -135,7 +135,6 @@ void NDTLocalization::pointsCallback(const sensor_msgs::msg::PointCloud2 & point
   ndt_->align(*output_cloud, init_guess);
 
   const bool convergenced = ndt_->hasConverged();
-  const int final_iterations = ndt_->getFinalNumIteration();
 
   const Eigen::Matrix4f result_ndt_pose = ndt_->getFinalTransformation();
 
