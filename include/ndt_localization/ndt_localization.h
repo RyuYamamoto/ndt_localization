@@ -1,8 +1,9 @@
 #ifndef _NDT_LOCALIZATION_
 #define _NDT_LOCALIZATION_
 
-#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
+
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/float32.hpp>
 
@@ -16,8 +17,11 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #else
 #include <tf2_eigen/tf2_eigen.hpp>
+
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #endif
+
+#include <pcl_ros/transforms.hpp>
 
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/io.h>
@@ -25,8 +29,6 @@
 #include <pcl/point_types.h>
 #include <pcl/registration/ndt.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <pcl_ros/transforms.hpp>
-
 #include <pclomp/ndt_omp.h>
 
 class NDTLocalization : public rclcpp::Node
