@@ -17,11 +17,9 @@
     <arg name="rviz" value="false"/>
   </include>
 
-  <node pkg="tf2_ros" exec="static_transform_publisher" name="velodyne_transform_publisher" args="0 0 0 0 0 0 /base_link /velodyne" />
-
-  <node pkg="ndt_localization" exec="ndt_localization_node" name="ndt_localization_node">
-    <remap from="~/points_map" to="points_map"/>
-    <remap from="~/points_raw" to="velodyne_points"/>
+  <node pkg="ndt_localization" exec="ndt_localization_node" name="ndt_localization_node" output="screen">
+    <remap from="points_map" to="points_map"/>
+    <remap from="points_raw" to="velodyne_points"/>
     <param name="min_range" value="$(var min_range)"/>
     <param name="max_range" value="$(var max_range)"/>
     <param name="downsample_leaf_size" value="$(var downsample_leaf_size)"/>

@@ -104,6 +104,9 @@ void NDTLocalization::pointsCallback(const sensor_msgs::msg::PointCloud2 & point
   pcl::PointCloud<PointType>::Ptr crop_cloud(new pcl::PointCloud<PointType>);
   crop(filtered_cloud, crop_cloud, min_range_, max_range_);
 
+  crop_cloud->width = crop_cloud->points.size();
+  crop_cloud->height = 1;
+
   // transform base_link to sensor_link
   pcl::PointCloud<PointType>::Ptr transform_cloud_ptr(new pcl::PointCloud<PointType>);
   const std::string sensor_frame_id = points.header.frame_id;
@@ -168,7 +171,7 @@ void NDTLocalization::pointsCallback(const sensor_msgs::msg::PointCloud2 & point
   if (convergenced) {
     ndt_pose_publisher_->publish(ndt_pose_msg);
     ndt_pose_with_covariance_publisher_->publish(ndt_pose_with_covariance_msg);
-    publishTF(map_frame_id_, base_frame_id_, ndt_pose_msg);
+    publishTF(map_frame_id_, "ndt_base_link", ndt_pose_msg);
   }
 
   std_msgs::msg::Float32 transform_probability;
