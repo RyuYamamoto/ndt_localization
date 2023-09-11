@@ -1,12 +1,22 @@
 <launch>
   <arg name="map_path" default="$(find-pkg-share points_map_loader)/pcd/test.pcd"/>
   <arg name="rviz" default="true"/>
-  <arg name="min_range" default="0.5"/>
-  <arg name="max_range" default="60.0"/>
-  <arg name="downsample_leaf_size" default="3.0"/>
+  <arg name="correct_translation_offset" default="false"/>
+  <arg name="correct_orientation_offset" default="true"/>
+  <arg name="min_crop_vehicle_x" default="-1.0"/>
+  <arg name="max_crop_vehicle_x" default="1.0"/>
+  <arg name="min_crop_vehicle_y" default="-1.0"/>
+  <arg name="max_crop_vehicle_y" default="1.0"/>
+  <arg name="min_range_x" default="-70.0"/>
+  <arg name="max_range_x" default="70.0"/>
+  <arg name="min_range_y" default="70.0"/>
+  <arg name="max_range_y" default="70.0"/>
+  <arg name="min_range_z" default="-30.0"/>
+  <arg name="max_range_z" default="50.0"/>
+  <arg name="downsample_leaf_size" default="2.0"/>
   <arg name="transformation_epsilon" default="0.01"/>
   <arg name="step_size" default="0.1"/>
-  <arg name="ndt_resolution" default="2.0"/>
+  <arg name="ndt_resolution" default="3.0"/>
   <arg name="max_iteration" default="30"/>
   <arg name="omp_num_thread" default="4"/>
   <arg name="map_frame_id" default="map"/>
@@ -17,13 +27,22 @@
     <arg name="rviz" value="false"/>
   </include>
 
-  <node pkg="tf2_ros" exec="static_transform_publisher" name="velodyne_transform_publisher" args="0 0 0 0 0 0 /base_link /velodyne" />
-
-  <node pkg="ndt_localization" exec="ndt_localization_node" name="ndt_localization_node">
-    <remap from="~/points_map" to="points_map"/>
-    <remap from="~/points_raw" to="velodyne_points"/>
-    <param name="min_range" value="$(var min_range)"/>
-    <param name="max_range" value="$(var max_range)"/>
+  <node pkg="ndt_localization" exec="ndt_localization_node" name="ndt_localization_node" output="screen">
+    <remap from="points_raw" to="/velodyne_points"/>
+    <remap from="ndt_pose" to="/localization/pose"/>
+    <remap from="ndt_pose_with_covariance" to="/localization/pose_with_covariance"/>
+    <param name="correct_translation_offset" value="$(var correct_translation_offset)"/>
+    <param name="correct_orientation_offset" value="$(var correct_orientation_offset)"/>
+    <param name="min_crop_vehicle_x" value="$(var min_crop_vehicle_x)"/>
+    <param name="max_crop_vehicle_x" value="$(var max_crop_vehicle_x)"/>
+    <param name="min_crop_vehicle_y" value="$(var min_crop_vehicle_y)"/>
+    <param name="max_crop_vehicle_y" value="$(var max_crop_vehicle_y)"/>
+    <param name="min_range_x" value="$(var min_range_x)"/>
+    <param name="max_range_x" value="$(var max_range_x)"/>
+    <param name="min_range_y" value="$(var min_range_y)"/>
+    <param name="max_range_y" value="$(var max_range_y)"/>
+    <param name="min_range_z" value="$(var min_range_z)"/>
+    <param name="max_range_z" value="$(var max_range_z)"/>
     <param name="downsample_leaf_size" value="$(var downsample_leaf_size)"/>
     <param name="transformation_epsilon" value="$(var transformation_epsilon)"/>
     <param name="step_size" value="$(var step_size)"/>
@@ -34,5 +53,7 @@
     <param name="base_frame_id" value="$(var base_frame_id)"/>
   </node>
 
-  <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(find-pkg-share ndt_localization)/rviz/ndt.rviz"/>
+  <group if="$(var rviz)">
+    <node pkg="rviz2" exec="rviz2" name="rviz2" args="-d $(find-pkg-share ndt_localization)/rviz/ndt.rviz"/>
+  </group>
 </launch>
