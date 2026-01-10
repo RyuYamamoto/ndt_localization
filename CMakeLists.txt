@@ -12,6 +12,7 @@ endif()
 
 find_package(ament_cmake_auto REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(tf2_sensor_msgs REQUIRED)
 find_package(PCL REQUIRED)
 ament_auto_find_build_dependencies()
 
