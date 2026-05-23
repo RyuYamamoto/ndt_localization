@@ -1,5 +1,8 @@
 #include <ndt_localization/ndt_localization.h>
 
+#include <algorithm>
+#include <cmath>
+
 NDTLocalization::NDTLocalization() : Node("ndt_localization")
 {
   min_crop_vehicle_x_ = this->declare_parameter<double>("min_crop_vehicle_x");
@@ -29,7 +32,9 @@ NDTLocalization::NDTLocalization() : Node("ndt_localization")
   base_frame_id_ = this->declare_parameter("base_frame_id", "base_link");
 
   ndt_ = std::make_shared<pclomp::NormalDistributionsTransform<PointType, PointType>>();
-  broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+  tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
+  broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
   ndt_->setTransformationEpsilon(transformation_epsilon_);
   ndt_->setStepSize(step_size_);
@@ -39,17 +44,19 @@ NDTLocalization::NDTLocalization() : Node("ndt_localization")
   if (0 < omp_num_thread_) ndt_->setNumThreads(omp_num_thread_);
 
   imu_subscriber_ = this->create_subscription<sensor_msgs::msg::Imu>(
-    "imu", 5, std::bind(&NDTLocalization::imu_callback, this, std::placeholders::_1));
+    "imu", 5, [this](const sensor_msgs::msg::Imu & msg) { imu_callback(msg); });
   map_subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
     "points_map", rclcpp::QoS{1}.transient_local(),
-    std::bind(&NDTLocalization::map_callback, this, std::placeholders::_1));
+    [this](const sensor_msgs::msg::PointCloud2 & msg) { map_callback(msg); });
   points_subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
     "points_raw", rclcpp::SensorDataQoS().keep_last(5),
-    std::bind(&NDTLocalization::points_callback, this, std::placeholders::_1));
+    [this](const sensor_msgs::msg::PointCloud2 & msg) { points_callback(msg); });
   initialpose_subscriber_ =
     this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
       "/initialpose", 1,
-      std::bind(&NDTLocalization::initial_pose_callback, this, std::placeholders::_1));
+      [this](const geometry_msgs::msg::PoseWithCovarianceStamped & msg) {
+        initial_pose_callback(msg);
+      });
 
   ndt_result_path_.header.frame_id = map_frame_id_;
 
@@ -65,8 +72,7 @@ NDTLocalization::NDTLocalization() : Node("ndt_localization")
 }
 
 void NDTLocalization::downsample(
-  const pcl::PointCloud<PointType>::Ptr & input_cloud_ptr,
-  pcl::PointCloud<PointType>::Ptr & output_cloud_ptr)
+  const PointCloud::Ptr & input_cloud_ptr, PointCloud::Ptr & output_cloud_ptr)
 {
   pcl::VoxelGrid<PointType> voxel_grid;
   voxel_grid.setLeafSize(downsample_leaf_size_, downsample_leaf_size_, downsample_leaf_size_);
@@ -75,18 +81,21 @@ void NDTLocalization::downsample(
 }
 
 void NDTLocalization::crop(
-  const pcl::PointCloud<PointType>::Ptr & input_cloud_ptr,
-  pcl::PointCloud<PointType>::Ptr output_cloud_ptr)
+  const PointCloud::Ptr & input_cloud_ptr, PointCloud::Ptr & output_cloud_ptr)
 {
   for (const auto & p : input_cloud_ptr->points) {
-    if (
-      min_range_x_ < p.x < max_range_x_ and min_range_y_ < p.y < max_range_y_ and
-      min_range_z_ < p.z < max_range_z_) {
-      if (
-        (p.x < min_crop_vehicle_x_ or max_crop_vehicle_x_ < p.x) and
-        (p.y < min_crop_vehicle_y_ or max_crop_vehicle_y_ < p.y))
-        output_cloud_ptr->points.emplace_back(p);
-    }
+    const bool in_range =
+      min_range_x_ < p.x && p.x < max_range_x_ &&
+      min_range_y_ < p.y && p.y < max_range_y_ &&
+      min_range_z_ < p.z && p.z < max_range_z_;
+    if (!in_range) continue;
+
+    const bool inside_vehicle =
+      min_crop_vehicle_x_ <= p.x && p.x <= max_crop_vehicle_x_ &&
+      min_crop_vehicle_y_ <= p.y && p.y <= max_crop_vehicle_y_;
+    if (inside_vehicle) continue;
+
+    output_cloud_ptr->points.emplace_back(p);
   }
 }
 
@@ -95,17 +104,11 @@ void NDTLocalization::imu_callback(const sensor_msgs::msg::Imu & imu)
   imu_queue_.emplace_back(imu);
 }
 
-void NDTLocalization::suggest_init_pose_callback(
-  const geometry_msgs::msg::PoseStamped & suggest_init_pose)
-{
-  pose_queue_.emplace_back(suggest_init_pose);
-}
-
 void NDTLocalization::map_callback(const sensor_msgs::msg::PointCloud2 & map)
 {
   RCLCPP_INFO(get_logger(), "map callback");
 
-  pcl::PointCloud<PointType>::Ptr map_cloud(new pcl::PointCloud<PointType>);
+  auto map_cloud = std::make_shared<PointCloud>();
   pcl::fromROSMsg(map, *map_cloud);
 
   ndt_->setInputTarget(map_cloud);
@@ -124,43 +127,37 @@ void NDTLocalization::points_callback(const sensor_msgs::msg::PointCloud2 & poin
   }
 
   const rclcpp::Time current_scan_time = points.header.stamp;
-  static rclcpp::Time previous_scan_time = current_scan_time;
+  if (!previous_scan_time_.has_value()) {
+    previous_scan_time_ = current_scan_time;
+  }
 
-  const double dt = (current_scan_time - previous_scan_time).seconds();
+  const double dt = (current_scan_time - previous_scan_time_.value()).seconds();
 
-  pcl::PointCloud<PointType>::Ptr input_cloud_ptr(new pcl::PointCloud<PointType>);
+  auto input_cloud_ptr = std::make_shared<PointCloud>();
   pcl::fromROSMsg(points, *input_cloud_ptr);
 
-  // downsampling input point cloud
-  pcl::PointCloud<PointType>::Ptr filtered_cloud(new pcl::PointCloud<PointType>);
+  auto filtered_cloud = std::make_shared<PointCloud>();
   downsample(input_cloud_ptr, filtered_cloud);
 
-  // crop point cloud
-  pcl::PointCloud<PointType>::Ptr crop_cloud(new pcl::PointCloud<PointType>);
+  auto crop_cloud = std::make_shared<PointCloud>();
   crop(filtered_cloud, crop_cloud);
 
   crop_cloud->width = crop_cloud->points.size();
   crop_cloud->height = 1;
 
   // transform base_link to sensor_link
-  pcl::PointCloud<PointType>::Ptr transform_cloud_ptr(new pcl::PointCloud<PointType>);
+  auto transform_cloud_ptr = std::make_shared<PointCloud>();
   const std::string sensor_frame_id = points.header.frame_id;
   geometry_msgs::msg::TransformStamped sensor_frame_transform;
   try {
-    sensor_frame_transform = tf_buffer_.lookupTransform(
+    sensor_frame_transform = tf_buffer_->lookupTransform(
       base_frame_id_, sensor_frame_id, current_scan_time, tf2::durationFromSec(0.5));
-  } catch (tf2::TransformException & ex) {
+  } catch (const tf2::TransformException & ex) {
     RCLCPP_ERROR(get_logger(), "%s", ex.what());
     sensor_frame_transform.header.stamp = current_scan_time;
     sensor_frame_transform.header.frame_id = base_frame_id_;
     sensor_frame_transform.child_frame_id = sensor_frame_id;
-    sensor_frame_transform.transform.translation.x = 0.0;
-    sensor_frame_transform.transform.translation.y = 0.0;
-    sensor_frame_transform.transform.translation.z = 0.0;
     sensor_frame_transform.transform.rotation.w = 1.0;
-    sensor_frame_transform.transform.rotation.x = 0.0;
-    sensor_frame_transform.transform.rotation.y = 0.0;
-    sensor_frame_transform.transform.rotation.z = 0.0;
   }
   const Eigen::Affine3d base_to_sensor_frame_affine = tf2::transformToEigen(sensor_frame_transform);
   const Eigen::Matrix4f base_to_sensor_frame_matrix =
@@ -168,41 +165,34 @@ void NDTLocalization::points_callback(const sensor_msgs::msg::PointCloud2 & poin
   pcl::transformPointCloud(*crop_cloud, *transform_cloud_ptr, base_to_sensor_frame_matrix);
   ndt_->setInputSource(transform_cloud_ptr);
 
-  // imu fusion
-  double roll, pitch, yaw;
-  tf2::Quaternion quat(
-    initial_pose_.orientation.x, initial_pose_.orientation.y, initial_pose_.orientation.z,
-    initial_pose_.orientation.w);
-  tf2::Matrix3x3 mat(quat);
-  mat.getRPY(roll, pitch, yaw);
-
+  // pick the latest imu sample whose timestamp is <= current_scan_time
   if (!imu_queue_.empty()) {
-    // get latest imu data
-    sensor_msgs::msg::Imu latest_imu_msgs;
-    for (auto & imu : imu_queue_) {
-      latest_imu_msgs = imu;
-      const auto time_stamp = latest_imu_msgs.header.stamp;
-      if (current_scan_time < time_stamp) {
-        break;
-      }
+    std::optional<sensor_msgs::msg::Imu> latest_imu;
+    for (const auto & imu : imu_queue_) {
+      if (rclcpp::Time(imu.header.stamp) > current_scan_time) break;
+      latest_imu = imu;
     }
-    while (!imu_queue_.empty()) {
-      if (rclcpp::Time(imu_queue_.front().header.stamp) >= current_scan_time) {
-        break;
-      }
+    while (!imu_queue_.empty() &&
+           rclcpp::Time(imu_queue_.front().header.stamp) < current_scan_time) {
       imu_queue_.pop_front();
     }
-    // corrent orientation
+    if (latest_imu.has_value()) {
+      imu_data_ = latest_imu;
+    }
+  }
+
+  // imu-based pose offset correction
+  if (imu_data_.has_value()) {
+    double roll, pitch, yaw;
+    tf2::Quaternion quat(
+      initial_pose_.orientation.x, initial_pose_.orientation.y, initial_pose_.orientation.z,
+      initial_pose_.orientation.w);
+    tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+
     if (correct_orientation_offset_) {
-      double roll, pitch, yaw;
-      tf2::Quaternion quat(
-        initial_pose_.orientation.x, initial_pose_.orientation.y, initial_pose_.orientation.z,
-        initial_pose_.orientation.w);
-      tf2::Matrix3x3 mat(quat);
-      mat.getRPY(roll, pitch, yaw);
-      roll += (imu_data_.angular_velocity.x * dt);
-      pitch += (imu_data_.angular_velocity.y * dt);
-      yaw += (imu_data_.angular_velocity.z * dt);
+      roll += imu_data_->angular_velocity.x * dt;
+      pitch += imu_data_->angular_velocity.y * dt;
+      yaw += imu_data_->angular_velocity.z * dt;
       quat.setRPY(roll, pitch, yaw);
       initial_pose_.orientation.x = quat.x();
       initial_pose_.orientation.y = quat.y();
@@ -210,25 +200,24 @@ void NDTLocalization::points_callback(const sensor_msgs::msg::PointCloud2 & poin
       initial_pose_.orientation.w = quat.w();
     }
 
-    // correct offset
     if (correct_translation_offset_) {
-      double acc_x1 = imu_data_.linear_acceleration.x;
-      double acc_y1 = std::cos(roll) * imu_data_.linear_acceleration.y -
-                      std::sin(roll) * imu_data_.linear_acceleration.z;
-      double acc_z1 = std::sin(roll) * imu_data_.linear_acceleration.y +
-                      std::cos(roll) * imu_data_.linear_acceleration.z;
+      const double acc_x1 = imu_data_->linear_acceleration.x;
+      const double acc_y1 = std::cos(roll) * imu_data_->linear_acceleration.y -
+                            std::sin(roll) * imu_data_->linear_acceleration.z;
+      const double acc_z1 = std::sin(roll) * imu_data_->linear_acceleration.y +
+                            std::cos(roll) * imu_data_->linear_acceleration.z;
 
-      double acc_x2 = std::sin(pitch) * acc_z1 + std::cos(pitch) * acc_x1;
-      double acc_y2 = acc_y1;
-      double acc_z2 = std::cos(pitch) * acc_z1 - std::sin(pitch) * acc_x1;
+      const double acc_x2 = std::sin(pitch) * acc_z1 + std::cos(pitch) * acc_x1;
+      const double acc_y2 = acc_y1;
+      const double acc_z2 = std::cos(pitch) * acc_z1 - std::sin(pitch) * acc_x1;
 
-      double acc_x = std::cos(yaw) * acc_x2 - std::sin(yaw) * acc_y2;
-      double acc_y = std::sin(yaw) * acc_x2 + std::cos(yaw) * acc_y2;
-      double acc_z = acc_z2;
+      const double acc_x = std::cos(yaw) * acc_x2 - std::sin(yaw) * acc_y2;
+      const double acc_y = std::sin(yaw) * acc_x2 + std::cos(yaw) * acc_y2;
+      const double acc_z = acc_z2;
 
-      double offset_translation_imu_x = imu_velocity_.x * dt + acc_x * dt * dt / 2.0;
-      double offset_translation_imu_y = imu_velocity_.y * dt + acc_y * dt * dt / 2.0;
-      double offset_translation_imu_z = imu_velocity_.z * dt + acc_z * dt * dt / 2.0;
+      const double offset_translation_imu_x = imu_velocity_.x * dt + acc_x * dt * dt / 2.0;
+      const double offset_translation_imu_y = imu_velocity_.y * dt + acc_y * dt * dt / 2.0;
+      const double offset_translation_imu_z = imu_velocity_.z * dt + acc_z * dt * dt / 2.0;
 
       imu_velocity_.x += acc_x * dt;
       imu_velocity_.y += acc_y * dt;
@@ -241,12 +230,11 @@ void NDTLocalization::points_callback(const sensor_msgs::msg::PointCloud2 & poin
   }
 
   // calculation initial pose for NDT
-  Eigen::Matrix4f init_guess = Eigen::Matrix4f::Identity();
   Eigen::Affine3d initial_pose_affine;
   tf2::fromMsg(initial_pose_, initial_pose_affine);
-  init_guess = initial_pose_affine.matrix().cast<float>();
+  const Eigen::Matrix4f init_guess = initial_pose_affine.matrix().cast<float>();
 
-  pcl::PointCloud<PointType>::Ptr output_cloud(new pcl::PointCloud<PointType>);
+  auto output_cloud = std::make_shared<PointCloud>();
   ndt_->align(*output_cloud, init_guess);
 
   const bool convergenced = ndt_->hasConverged();
@@ -258,9 +246,9 @@ void NDTLocalization::points_callback(const sensor_msgs::msg::PointCloud2 & poin
   const geometry_msgs::msg::Pose ndt_pose = tf2::toMsg(result_ndt_pose_affine);
 
   // estimate velocity
-  double dx = ndt_pose.position.x - initial_pose_.position.x;
-  double dy = ndt_pose.position.y - initial_pose_.position.y;
-  double dz = ndt_pose.position.z - initial_pose_.position.z;
+  const double dx = ndt_pose.position.x - initial_pose_.position.x;
+  const double dy = ndt_pose.position.y - initial_pose_.position.y;
+  const double dz = ndt_pose.position.z - initial_pose_.position.z;
   velocity_.x = (dt > 0.0) ? (dx / dt) : 0.0;
   velocity_.y = (dt > 0.0) ? (dy / dt) : 0.0;
   velocity_.z = (dt > 0.0) ? (dz / dt) : 0.0;
@@ -289,7 +277,7 @@ void NDTLocalization::points_callback(const sensor_msgs::msg::PointCloud2 & poin
   if (convergenced) {
     ndt_pose_publisher_->publish(ndt_pose_msg);
     ndt_pose_with_covariance_publisher_->publish(ndt_pose_with_covariance_msg);
-    publish_tf(map_frame_id_, "base_link", ndt_pose_msg);
+    publish_tf(map_frame_id_, base_frame_id_, ndt_pose_msg);
   }
 
   ndt_result_path_.header.stamp = current_scan_time;
@@ -304,7 +292,7 @@ void NDTLocalization::points_callback(const sensor_msgs::msg::PointCloud2 & poin
   aligned_cloud_msg.header = points.header;
   ndt_align_cloud_publisher_->publish(aligned_cloud_msg);
 
-  previous_scan_time = current_scan_time;
+  previous_scan_time_ = current_scan_time;
 }
 
 void NDTLocalization::initial_pose_callback(
@@ -320,17 +308,14 @@ void NDTLocalization::initial_pose_callback(
       get_logger(), "frame_id is not same. initialpose.header.frame_id is %s",
       initialpose.header.frame_id.c_str());
   }
-  imu_velocity_.x = 0.0;
-  imu_velocity_.y = 0.0;
-  imu_velocity_.z = 0.0;
-  velocity_.x = 0.0;
-  velocity_.y = 0.0;
-  velocity_.z = 0.0;
+  imu_velocity_ = geometry_msgs::msg::Vector3{};
+  velocity_ = geometry_msgs::msg::Vector3{};
+  previous_scan_time_.reset();
 }
 
 void NDTLocalization::publish_tf(
-  const std::string frame_id, const std::string child_frame_id,
-  const geometry_msgs::msg::PoseStamped pose)
+  const std::string & frame_id, const std::string & child_frame_id,
+  const geometry_msgs::msg::PoseStamped & pose)
 {
   geometry_msgs::msg::TransformStamped transform_stamped;
 
